@@ -61,6 +61,156 @@
             }, 500);
         });
     </script>
+    <script>
+        // Inicialização de Local Fixo e Select de Bairros
+        document.addEventListener('DOMContentLoaded', async function() {
+            try {
+                const cepInput = document.getElementById('cep');
+                const cityInputs = [
+                    document.getElementById('city'),
+                    document.getElementById('manual-city')
+                ].filter(Boolean);
+
+                // Aplicar trava de CEP/Cidade
+                if (typeof LOCAL_LOCK_ENABLED !== 'undefined' && LOCAL_LOCK_ENABLED) {
+                    if (cepInput) {
+                        const cepValor = (typeof LOCAL_LOCK_CEP !== 'undefined' ? LOCAL_LOCK_CEP : '');
+                        cepInput.value = cepValor;
+                        cepInput.readOnly = true;
+                        // Disparar eventos já usados no fluxo
+                        try { if (typeof handleCepInput === 'function') handleCepInput(); } catch (e) {}
+                        try { if (typeof fetchAddress === 'function') await fetchAddress(); } catch (e) {}
+                        // Reaplicar trava e valores após fetchAddress
+                        try {
+                            if (cepInput) {
+                                cepInput.readOnly = true;
+                                cepInput.value = (typeof LOCAL_LOCK_CEP !== 'undefined' ? LOCAL_LOCK_CEP : cepInput.value);
+                            }
+                            const cidadeValorPos = (typeof LOCAL_LOCK_CIDADE !== 'undefined' ? LOCAL_LOCK_CIDADE : '');
+                            cityInputs.forEach(el => {
+                                el.value = cidadeValorPos || el.value;
+                                el.readOnly = true;
+                            });
+                            // Sincronizar selects de bairro com inputs ocultos (se houver valor)
+                            const syncBairroSelect = (inputId) => {
+                                const inputRef = document.getElementById(inputId);
+                                const selectRef = document.getElementById(inputId + '-select');
+                                if (inputRef && selectRef && inputRef.value) {
+                                    const valor = inputRef.value;
+                                    const opt = Array.from(selectRef.options).find(o => o.value === valor);
+                                    if (opt) selectRef.value = valor;
+                                }
+                            };
+                            syncBairroSelect('neighborhood');
+                            syncBairroSelect('manual-neighborhood');
+                        } catch (e) {}
+                        try { if (typeof updateContinueButton === 'function') updateContinueButton(); } catch (e) {}
+                    }
+
+                    const cidadeValor = (typeof LOCAL_LOCK_CIDADE !== 'undefined' ? LOCAL_LOCK_CIDADE : '');
+                    cityInputs.forEach(el => {
+                        el.value = cidadeValor;
+                        el.readOnly = true;
+                        try { if (typeof updateAddressData === 'function') updateAddressData(); } catch (e) {}
+                        try { if (typeof updateManualAddressData === 'function') updateManualAddressData(); } catch (e) {}
+                        try { if (typeof updateContinueButton === 'function') updateContinueButton(); } catch (e) {}
+                    });
+                } else {
+                    // Modo regional: campos livres
+                    if (cepInput) cepInput.readOnly = false;
+                    cityInputs.forEach(el => el.readOnly = false);
+                }
+
+                // Converter campos de Bairro em <select> carregado da planilha
+                const bairroTargets = [
+                    { inputId: 'neighborhood', labelText: 'Bairro *' },
+                    { inputId: 'manual-neighborhood', labelText: 'Bairro *' }
+                ];
+
+                // Carregar dados de bairros (se a URL existir)
+                let bairrosLista = [];
+                try {
+                    if (typeof NEIGHBORHOODS_CSV_URL !== 'undefined' && NEIGHBORHOODS_CSV_URL) {
+                        const raw = await loadCSVData(NEIGHBORHOODS_CSV_URL);
+                        const firstKey = raw && raw.length > 0 ? Object.keys(raw[0])[0] : null;
+                        bairrosLista = (firstKey ? raw.map(row => String(row[firstKey] || '').trim()) : [])
+                            .filter(v => v);
+                        // Remover duplicados preservando ordem
+                        bairrosLista = Array.from(new Set(bairrosLista));
+                    }
+                } catch (err) {
+                    try { if (typeof errorLog === 'function') errorLog('Falha ao carregar bairros para o <select>:', err); } catch (_) { console.error(err); }
+                    bairrosLista = [];
+                }
+
+                // Função para criar select e manter compatibilidade com o input original
+                function substituirPorSelect(inputEl) {
+                    if (!inputEl) return;
+
+                    // Só substitui se existir lista de bairros
+                    if (!Array.isArray(bairrosLista) || bairrosLista.length === 0) return;
+
+                    const parent = inputEl.parentElement;
+                    if (!parent) return;
+
+                    // Evitar duplicações
+                    if (parent.querySelector('select[data-bairro-select="true"]')) return;
+
+                    const select = document.createElement('select');
+                    select.setAttribute('data-bairro-select', 'true');
+                    select.className = inputEl.className;
+                    select.id = inputEl.id + '-select';
+
+                    // Placeholder/primeira opção
+                    const optPlaceholder = document.createElement('option');
+                    optPlaceholder.value = '';
+                    optPlaceholder.textContent = 'Selecione o bairro';
+                    select.appendChild(optPlaceholder);
+
+                    // Opções a partir da planilha
+                    bairrosLista.forEach(nome => {
+                        const opt = document.createElement('option');
+                        opt.value = nome;
+                        opt.textContent = nome;
+                        select.appendChild(opt);
+                    });
+
+                    // Pré-selecionar se já existir valor no input
+                    if (inputEl.value && bairrosLista.includes(inputEl.value)) {
+                        select.value = inputEl.value;
+                    }
+
+                    // Espelhar valor no input original e disparar eventos existentes
+                    select.addEventListener('change', () => {
+                        const valor = select.value;
+                        inputEl.value = valor;
+                        // Disparar lógicas já usadas
+                        try { if (typeof updateAddressData === 'function') updateAddressData(); } catch (e) {}
+                        try { if (typeof updateManualAddressData === 'function') updateManualAddressData(); } catch (e) {}
+                        try { if (typeof buscarTaxaPorBairroRedundante === 'function') buscarTaxaPorBairroRedundante(valor, true); } catch (e) {}
+                        try { if (typeof searchNeighborhoodFee === 'function') searchNeighborhoodFee(); } catch (e) {}
+                        try { if (typeof hideNeighborhoodAutocomplete === 'function') hideNeighborhoodAutocomplete(); } catch (e) {}
+                        try { if (typeof clearFieldError === 'function') clearFieldError(inputEl.id); } catch (e) {}
+                        try { if (typeof updateContinueButton === 'function') updateContinueButton(); } catch (e) {}
+                    });
+
+                    // Manter input no DOM (compatibilidade), mas oculto
+                    inputEl.style.display = 'none';
+                    parent.appendChild(select);
+                }
+
+                // Aplicar substituição nos campos alvo
+                bairroTargets.forEach(target => {
+                    const el = document.getElementById(target.inputId);
+                    if (el) substituirPorSelect(el);
+                });
+
+            } catch (e) {
+                // Log seguro
+                try { errorLog('Erro na inicialização de local fixo/bairros:', e); } catch (_) { console.error(e); }
+            }
+        });
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- QR Code Library -->
     <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -197,7 +347,6 @@
         .nav-arrow:hover {
             transform: scale(1.05);
         }
-        
         .nav-arrow:active {
             transform: scale(0.95);
         }
@@ -390,7 +539,6 @@
         .bounce {
             animation: bounce 0.6s ease;
         }
-        
         @keyframes bounce {
             0%, 20%, 50%, 80%, 100% {
                 transform: translateY(0);
@@ -583,7 +731,6 @@
             color: var(--cor-texto-branco);
             border: 1px solid rgba(255,255,255,0.2);
         }
-        
         @keyframes toastSlideIn {
             from {
                 opacity: 0;
@@ -767,7 +914,6 @@
             </div>
         </div>
     </section>
-
     <!-- Footer -->
     <footer class="py-8" style="background-color: var(--cor-fundo) !important; border-top: 5px solid transparent !important; background-image: linear-gradient(var(--cor-fundo), var(--cor-fundo)), linear-gradient(45deg, var(--cor-primaria), var(--cor-secundaria), var(--cor-terciaria), var(--cor-secundaria), var(--cor-primaria)) !important; background-origin: border-box !important; background-clip: padding-box, border-box !important; background-size: 100% 100%, 400% 400% !important; box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.08) !important; position: relative; overflow: hidden;">
         <div class="max-w-4xl mx-auto px-4">
@@ -798,7 +944,7 @@
                             <path d="M2 2h2v2H2z"/>
                             <path d="M6 0v6H0V0zM5 1H1v4h4zM4 12H2v2h2z"/>
                             <path d="M6 10v6H0v-6zm-5 1v4h4v-4zm11-9h2v2h-2z"/>
-                            <path d="M10 0v6h6V0zm5 1v4h-4V1zM8 1V0h1v2H8v2H7V1zm0 5V4h1v2zM6 8V7h1V6h1v2h1V7h5v1h-4v1H7V8zm0 0v1H2V8H1v1H0V7h3v1zm10 1h-1V7h1zm-1 0h-1v2h2v-1h-1zm-4 0h2v1h-1v1h-1zm2 3v-1h-1v1h-1v1H9v1h3v-2zm0 0h3v1h-2v1h-1zm-4-1v1h1v-2H7v1z"/>
+                            <path d="M10 0v6h6V0zm5 1v4h-4V1zM8 1V0h1v2H8v2H7V1zm0 5V4h1v2zM6 8V7h1V6h1v2h1V7h5v1h-4v1H7V8zm0 0v1H2V8H1v1H0V7h3v1zm10 1h-1V7h1v1h-1zm-1 0h-1v2h2v-1h-1zm-4 0h2v1h-1v1h-1zm2 3v-1h-1v1h-1v1H9v1h3v-2zm0 0h3v1h-2v1h-1zm-4-1v1h1v-2H7v1z"/>
                             <path d="M7 12h1v3h4v1H7zm9 2v2h-3v-1h2v-1z"/>
                         </svg>
                     </div>
@@ -820,7 +966,7 @@
                 <div class="flex justify-center space-x-3">
                     <a id="footer-instagram" href="" target="_blank" style="display: none; background: linear-gradient(135deg, var(--cor-primaria), var(--cor-secundaria)); color: white; padding: 0.75rem; border-radius: 50%; transition: all 0.3s ease; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);" onmouseover="this.style.background='linear-gradient(135deg, var(--cor-secundaria), var(--cor-terciaria))'; this.style.transform='translateY(-3px) scale(1.05)'; this.style.boxShadow='0 8px 25px rgba(0, 0, 0, 0.2)'" onmouseout="this.style.background='linear-gradient(135deg, var(--cor-primaria), var(--cor-secundaria))'; this.style.transform='translateY(0) scale(1)'; this.style.boxShadow='0 4px 12px rgba(0, 0, 0, 0.15)'">
                         <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" style="color: white;">
-                            <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.40s-.644-1.44-1.439-1.44z"/>
+                            <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.947-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.40s-.644-1.44-1.439-1.44z"/>
                         </svg>
                     </a>
                     <a id="footer-facebook" href="" target="_blank" style="display: none; background: linear-gradient(135deg, var(--cor-primaria), var(--cor-secundaria)); color: white; padding: 0.75rem; border-radius: 50%; transition: all 0.3s ease; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);" onmouseover="this.style.background='linear-gradient(135deg, var(--cor-secundaria), var(--cor-terciaria))'; this.style.transform='translateY(-3px) scale(1.05)'; this.style.boxShadow='0 8px 25px rgba(0, 0, 0, 0.2)'" onmouseout="this.style.background='linear-gradient(135deg, var(--cor-primaria), var(--cor-secundaria))'; this.style.transform='translateY(0) scale(1)'; this.style.boxShadow='0 4px 12px rgba(0, 0, 0, 0.15)'">
@@ -963,7 +1109,6 @@
             </div>
         </div>
     </div>
-
     <!-- Edit Notes Modal -->
     <div id="edit-notes-modal" class="fixed inset-0 bg-black bg-opacity-50 modal-overlay hidden z-50" onclick="closeEditNotes(event)">
         <div class="flex items-center justify-center min-h-screen p-4">
@@ -1116,7 +1261,6 @@
                                 <span id="checkout-order-total" class="text-xl font-bold" style="color: var(--cor-primaria) !important;">R$ 0,00</span>
                             </div>
                         </div>
-                        
                         <!-- CAMPO DE CUPOM EXPANSÍVEL -->
                         <div class="border-t border-gray-200 pt-3">
                             
@@ -1200,7 +1344,7 @@
                                     <option value="51" data-flag="🇵🇪" data-format="999 999 999">🇵🇪 +51</option>
                                     <option value="598" data-flag="🇺🇾" data-format="9999 9999">🇺🇾 +598</option>
                                     <option value="595" data-flag="🇵🇾" data-format="999 999999">🇵🇾 +595</option>
-                                    <option value="591" data-flag="🇧🇴" data-format="9999 9999">🇧🇴 +591</option>
+                                    <option value="591" data-flag="🇧🇴" data-format="999 9999">🇧🇴 +591</option>
                                     <option value="593" data-flag="🇪🇨" data-format="99 999 9999">🇪🇨 +593</option>
                                     <option value="58" data-flag="🇻🇪" data-format="999-999-9999">🇻🇪 +58</option>
                                     <option value="592" data-flag="🇬🇾" data-format="999 9999">🇬🇾 +592</option>
@@ -1310,7 +1454,6 @@
             </div>
         </div>
     </div>
-
     <!-- Modal Estabelecimento Fechado -->
     <div id="closed-modal" class="fixed inset-0 bg-black bg-opacity-50 z-[1100] hidden">
         <div class="flex items-center justify-center min-h-screen p-4">
@@ -1509,7 +1652,6 @@
                             </div>
                         </div>
                     </div>
-                    
                     <!-- Footer -->
                     <div class="mt-6 pt-4 border-t text-center" style="border-color: var(--cor-primaria-clara);">
                         <p class="text-xs" style="color: var(--cor-texto-secundario) !important; opacity: 0.8;">💡 Pressione <strong>F1</strong> a qualquer momento para ver esta ajuda</p>
@@ -1690,7 +1832,6 @@
                 throw error;
             }
         }
-
         // Function to process configuration data
         function processConfigData(configItems) {
             const config = {
@@ -2092,7 +2233,6 @@
                 errorLog('❌ Error setting up delivery options:', error);
             }
         }
-
         // Function to update footer with configuration data
         function updateFooterWithConfig() {
             const contactInfo = getContactInfo();
@@ -2293,7 +2433,6 @@
             // Verifica o segundo dígito
             return parseInt(cleanCPF.charAt(10)) === digit2;
         }
-        
         function detectPixKeyType(pixKey) {
             if (!pixKey || pixKey.trim() === '') return 'empty';
             
@@ -2445,7 +2584,6 @@
             
             document.body.removeChild(textArea);
         }
-
         function showPixInfo() {
             const checkoutConfig = getCheckoutConfig();
             const pixKey = checkoutConfig.step3_chave_pix;
@@ -2618,7 +2756,6 @@
 
             return processedData;
         }
-
         // Function to show preloader
         function showPreloader() {
             // Verificar se a variável PRELOADER_LOGO_URL existe e não está vazia
@@ -2818,7 +2955,6 @@
                 </style>
             `;
             document.body.insertAdjacentHTML('beforeend', preloaderHTML);
-            
             // Desabilitar scroll do body durante o preloader
             document.body.style.overflow = 'hidden';
             if (typeof debugLog === 'function') {
@@ -3157,7 +3293,6 @@
             changeAmount: '',
             notes: ''
         };
-
         // Parse variations from classificacaoAdicional
         function parseVariations(classificacaoAdicional) {
             if (!classificacaoAdicional) return null;
@@ -3312,9 +3447,6 @@
                 text: classificacaoAdicional.trim()
             };
         }
-
-
-
         // Process image URL to handle different sources
         function processImageUrl(url) {
             if (!url || url.trim() === '') {
@@ -3504,7 +3636,6 @@
             // Atualizar setas inicialmente
             setTimeout(updateNavigationArrows, 100);
         }
-        
         // Setup click listeners for category buttons
         function setupCategoryClickListeners() {
             const categoryButtons = document.querySelectorAll('.category-item');
@@ -3696,7 +3827,6 @@
                             </div>
                         `;
                     }).join('');
-                    
                 } else if (variations.type === 'variation') {
                     // Formato legado - variação única
                     const inputType = variations.required ? 'radio' : 'checkbox';
@@ -3897,7 +4027,6 @@
             updateModalPricing();
             updateAddToCartButton();
         }
-
         // Handle multiple variation change (novo formato)
         function handleMultipleVariationChange(variationIndex, optionIndex, name, price, type, isRequired, isRemoval) {
             debugLog('🎯 handleMultipleVariationChange chamada:', { 
@@ -4247,7 +4376,6 @@
             } else if (priceType === 'consultation') {
                 basePrice = 0; // Preço de consulta não tem valor numérico
             }
-            
             const totalPrice = basePrice + variationPrice;
             
             // Create variation key for grouping similar items (include notes in key if present)
@@ -4436,7 +4564,6 @@
             cartFab.classList.add('bounce');
             setTimeout(() => cartFab.classList.remove('bounce'), 600);
         }
-
         // Open cart
         async function openCart() {
             // VERIFICAR SE ESTABELECIMENTO ESTÁ ABERTO
@@ -4628,7 +4755,6 @@
             
             debugLog('✅ Carrinho limpo com sucesso');
         }
-
         // Reset Step 2 - Limpa completamente o estado do step 2
         function resetStep2() {
             debugLog('=== RESET STEP 2 ===');
@@ -4828,7 +4954,6 @@
                 document.getElementById('cart-fab').style.display = 'flex';
             }
         }
-        
         // Back to cart from checkout
         function backToCart() {
             // Fechar checkout
@@ -4999,7 +5124,6 @@
                 errorLog('syncDeliveryFeeBeforeStep3 error:', e);
             }
         }
-        
         // Enhanced Step 2 validation - validates all required fields
         function validateStep2Enhanced() {
             const deliveryType = document.querySelector('input[name="delivery-type"]:checked')?.value;
@@ -5189,9 +5313,6 @@
         function prevStep(step) {
             showStep(step);
         }
-
-
-
         // Update cart quantity
         function updateCartQuantity(itemKey, delta) {
             const item = cart.find(item => item.itemKey === itemKey);
@@ -5517,7 +5638,6 @@
                     break;
             }
         }
-
         // Handle CEP input - fetch address when 8 digits are entered
         function handleCepInput() {
             const cep = document.getElementById('cep').value.replace(/\D/g, '');
@@ -5699,7 +5819,6 @@
                     continue;
                 }
             }
-            
             // If we get here, all APIs failed
             errorLog('Todas as APIs de CEP falharam');
             
@@ -5879,7 +5998,6 @@
                 }
             });
         }
-
         /**
          * Limpa seleção de variação específica
          * @param {string} inputName - Nome do grupo de inputs
@@ -6070,7 +6188,6 @@
             }
             return true;
         }
-        
         function validateCustomerName() {
             const name = document.getElementById('customer-name')?.value.trim();
             if (!name) {
@@ -6265,7 +6382,6 @@
             // Função mantida para compatibilidade, mas não é mais usada
             // Agora o cupom só é aplicado via botão
         }
-        
         // Aplicar cupom
         function applyCoupon(code) {
             debugLog('🔍 Validando cupom:', code);
@@ -6466,7 +6582,6 @@
                 return false;
             }
         }
-        
         /**
          * Verifica se está aberto em um horário específico
          */
@@ -6643,7 +6758,6 @@
             debugLog('✅ Cupom válido dentro do período de validade');
             return true;
         }
-        
         // Parsear data do cupom considerando o timezone
         function parseCouponDate(dateStr, timezone) {
             if (!dateStr || dateStr === '-' || dateStr.trim() === '') {
@@ -6842,7 +6956,6 @@
                 clearBtn.classList.add('hidden');
             }
         }
-        
         // Limpar input e resetar cupom completamente
         function clearCouponInput() {
             const couponInput = document.getElementById('coupon-code');
@@ -7020,7 +7133,6 @@
                 debugLog('🧹 Campo de troco resetado completamente (input + label)');
             }
         }
-        
         /**
          * Manipula o toggle do switcher de troco
          */
@@ -7203,7 +7315,6 @@
                 errorLog('Erro ao atualizar orderData:', e);
             }
         }
-        
         // Configura atalhos de teclado
         function setupKeyboardShortcuts() {
             debugLog('🎹 Configurando atalhos de teclado...');
@@ -7527,7 +7638,6 @@
                 debugLog('❌ Botão continuar DESABILITADO');
             }
         }
-
         /**
          * Exibe mensagem de erro quando bairro não é atendido
          * @param {string} neighborhood - Nome do bairro
@@ -7681,7 +7791,6 @@
             
             debugLog('Dados do endereço atualizados:', window.orderData.address);
         }
-        
         // Variável para controlar o timeout de busca do bairro no modo CEP
         let cepNeighborhoodSearchTimeout = null;
         
@@ -7879,7 +7988,6 @@
                 window.autocompleteEventAdded = true;
             }
         }
-        
         /**
          * Verifica se o valor do input mudou e para o spinner se necessário
          */
@@ -8079,7 +8187,6 @@
                 
                 field.parentNode.appendChild(autocompleteContainer);
             }
-            
             // Gerar HTML das sugestões
             let html = '';
             sugestoes.forEach((bairro, index) => {
@@ -8276,7 +8383,6 @@
             // Remover spinner sempre ao final
             hideNeighborhoodSpinner();
         }
-        
         /**
          * Calcula a similaridade entre duas strings usando algoritmo de Levenshtein
          */
@@ -8650,7 +8756,6 @@
             
             debugLog('DEBUG - Dados endereço manual atualizados:', orderData.address);
         }
-
         /**
          * Busca taxa de delivery por bairro no modo manual (com debounce)
          */
@@ -8839,7 +8944,6 @@
         function showCustomAlert(message, type = 'error') {
             showToast(message, type);
         }
-
         // Format WhatsApp number with country-specific mask
         /**
          * Formata número de telefone para exibição
@@ -9031,7 +9135,6 @@
             phoneInput.placeholder = format;
             phoneInput.value = ''; // Clear current value when country changes
         }
-        
         // Detect country by IP and set default country code
         async function detectCountryByIP() {
             // Lista de APIs que tentaremos, em ordem de prioridade
@@ -9204,7 +9307,6 @@
                     hasErrors = true;
                 }
             }
-            
             // Validate payment method only if payment methods are enabled AND not "Consumo no Local"
             const checkoutConfig = getCheckoutConfig();
             if (checkoutConfig.step3_show_formas_pag === 'Sim' && orderData.deliveryType !== 'local') {
@@ -9360,7 +9462,6 @@
             const currency = getCurrentCurrency();
             return currencyConfig[currency] || currencyConfig['BRL'];
         }
-
         /**
          * Função para escurecer uma cor em 30%
          * @param {string} cor - Cor em formato hexadecimal, RGB ou variável CSS
@@ -9543,7 +9644,6 @@
                 return 0;
             }
         }
-        
         // Detectar tipo de preço
         function getPriceType(priceField) {
             // Converter para string e validar
@@ -9705,7 +9805,6 @@
                 return '<span style="color: var(--cor-secundaria); font-weight: bold;">💬 Consulte</span>';
             }
         }
-
         // Send to WhatsApp or Webhook
         function sendToWhatsApp() {
             if (cart.length === 0) return;
@@ -9905,7 +10004,6 @@
                 const itemPrice = parseFloat(item.preco);
                 return isNaN(itemPrice) || itemPrice <= 0;
             });
-            
             const hasPricedItems = cart.some(item => {
                 const itemPrice = parseFloat(item.preco);
                 return !isNaN(itemPrice) && itemPrice > 0;
@@ -10106,7 +10204,6 @@
                     couponDiscount = calculateCouponDiscount(coupon) || 0;
                 } catch (_) { /* noop */ }
             }
-            
             // Calculate totals
             let subtotal = cart.reduce((sum, item) => {
                 const price = (typeof parsePrice === 'function') ? parsePrice(item.preco) : parseFloat(String(item.preco).replace(/[^0-9.,]/g, '').replace(',', '.'));
@@ -10302,7 +10399,6 @@
             debugLog('cart após reset:', cart);
             debugLog('currentDeliveryFee após reset:', currentDeliveryFee);
         }
-        
         // Send via Webhook
         function sendViaWebhook(message, webhookUrl) {
             debugLog('=== DEBUG WEBHOOK ===');
@@ -10481,7 +10577,6 @@
                 }
             });
             debugLog('================================');
-            
             // Show loading message
             showCustomAlert('Enviando pedido...', 'info');
             
@@ -10677,7 +10772,6 @@
                 retryScroll();
             }, 100); // Initial delay to ensure DOM rendering
         }
-
         // SCROLL SPY DEFINITIVO - Técnica tradicional e confiável
         let scrollSpyEnabled = true;
         let scrollSpyTimeout = null;
@@ -10865,7 +10959,6 @@
             
             if (typeof debugLog === 'function') debugLog('✅ Search functionality initialized');
         }
-        
         // Perform search
         function performSearch() {
             const searchInput = document.getElementById('search');
@@ -11067,7 +11160,6 @@
                 }, 500);
             });
         }
-
         // Share specific category
         function shareCategory(category) {
             // Get category display name from dynamic data
@@ -11257,7 +11349,6 @@
                     errorLog('❌ Nenhum cronograma encontrado para hoje:', dayOfWeek);
                     return;
                 }
-                
                 debugLog('🔍 Verificando se está aberto...');
                 const isOpen = checkIfOpenFromPeriods(todaySchedule, currentTime);
                 const nextCloseTime = getNextCloseTimeFromPeriods(todaySchedule, currentTime);
@@ -11453,7 +11544,6 @@
             }
             return null;
         }
-        
         function getNextCloseTimeFromPeriods(schedule, currentTime) {
             // Get time periods from CSV format
             const periods = [schedule.period1, schedule.period2, schedule.period3];
@@ -11653,7 +11743,6 @@
                     
                     html += `</div></div>`;
                 }
-                
                 debugLog('✅ Processamento concluído. Total de dias processados:', (html.match(/<h3 class="font-semibold/g) || []).length);
                 
                 content.innerHTML = html;
@@ -11809,7 +11898,6 @@
 
         // Update hours every minute
         setInterval(updateOperatingHours, 60000);
-
         // ===== FUNÇÕES RELÓGIO TIMEZONE =====
         
         let timezoneClockInterval = null;
@@ -11995,7 +12083,6 @@
                 
                 debugLog('✅ QR Code gerado e pronto para download!');
                 debugLog('🔗 URL da API:', qrApiUrl);
-                
             } catch (error) {
                 errorLog('❌ Erro ao gerar QR Code:', error);
                 
@@ -12191,7 +12278,6 @@
             }
             return null;
         }
-
         function preencheMesaAutomatica() {
             const mesaURL = getMesaFromURL();
             const campoMesa = document.getElementById('table-number');
@@ -12392,7 +12478,6 @@
         .notification-close:hover {
             background-color: rgba(255, 255, 255, 0.2);
         }
-
         /* Responsividade para mobile */
         @media (max-width: 640px) {
             .notification {
@@ -12786,7 +12871,6 @@
         storageLog('🛍 Nenhum item no carrinho para restaurar');
         return false;
     };
-    
     /**
      * Limpar carrinho do localStorage
      */
@@ -12797,196 +12881,6 @@
         }
         return success;
     };
-    
-    // ===== FUNÇÕES ESPECÍFICAS DE CUPONS =====
-    
-    /**
-     * Salvar cupom no localStorage
-     */
-    window.saveCouponToStorage = function() {
-        if (typeof appliedCoupon !== 'undefined' && typeof couponDiscount !== 'undefined') {
-            const couponData = {
-                appliedCoupon: appliedCoupon,
-                couponDiscount: couponDiscount
-            };
-            const success = saveToStorage(STORAGE_CONFIG.KEYS.COUPON, couponData);
-            if (success && appliedCoupon) {
-                storageLog(`🎟️ Cupom salvo: ${appliedCoupon.codigo} (${couponDiscount})`);
-            }
-            return success;
-        }
-        return false;
-    };
-    
-    /**
-     * Carregar cupom do localStorage
-     */
-    window.loadCouponFromStorage = function() {
-        const couponData = loadFromStorage(STORAGE_CONFIG.KEYS.COUPON);
-        if (couponData && couponData.appliedCoupon) {
-            if (typeof appliedCoupon !== 'undefined' && typeof couponDiscount !== 'undefined') {
-                appliedCoupon = couponData.appliedCoupon;
-                couponDiscount = couponData.couponDiscount || 0;
-                storageLog(`🎟️ Cupom restaurado: ${appliedCoupon.codigo} (${couponDiscount})`);
-                return true;
-            }
-        }
-        return false;
-    };
-    
-    /**
-     * Limpar cupom do localStorage
-     */
-    window.clearCouponFromStorage = function() {
-        const success = removeFromStorage(STORAGE_CONFIG.KEYS.COUPON);
-        if (success) {
-            storageLog('🎟️ Cupom limpo do localStorage');
-        }
-        return success;
-    };
-    
-    // ===== FUNÇÕES ESPECÍFICAS DE DADOS DO PEDIDO =====
-    
-    /**
-     * Salvar dados do pedido no localStorage
-     */
-    window.saveOrderDataToStorage = function() {
-        if (typeof orderData !== 'undefined' && orderData) {
-            const success = saveToStorage(STORAGE_CONFIG.KEYS.ORDER_DATA, orderData);
-            if (success) {
-                storageLog('📝 Dados do pedido salvos', orderData);
-            }
-            return success;
-        }
-        return false;
-    };
-    
-    /**
-     * Carregar dados do pedido do localStorage
-     */
-    window.loadOrderDataFromStorage = function() {
-        const savedOrderData = loadFromStorage(STORAGE_CONFIG.KEYS.ORDER_DATA);
-        if (savedOrderData && typeof orderData !== 'undefined') {
-            // Mesclar dados salvos com dados atuais
-            Object.assign(orderData, savedOrderData);
-            
-            // Preencher campos do formulário
-            fillFormFields(savedOrderData);
-            
-            storageLog('📝 Dados do pedido restaurados', savedOrderData);
-            return true;
-        }
-        return false;
-    };
-    
-    /**
-     * Preencher campos do formulário com dados salvos
-     */
-    function fillFormFields(data) {
-        try {
-            if (data.customerName) {
-                const nameField = document.getElementById('customer-name');
-                if (nameField) nameField.value = data.customerName;
-            }
-            
-            if (data.whatsapp) {
-                const whatsappField = document.getElementById('customer-whatsapp');
-                if (whatsappField) whatsappField.value = data.whatsapp;
-            }
-            
-            if (data.paymentMethod) {
-                const paymentField = document.getElementById('payment-method');
-                if (paymentField) paymentField.value = data.paymentMethod;
-            }
-            
-            if (data.changeAmount) {
-                const changeField = document.getElementById('change-amount');
-                if (changeField) changeField.value = data.changeAmount;
-            }
-            
-            if (data.notes) {
-                const notesField = document.getElementById('order-notes');
-                if (notesField) notesField.value = data.notes;
-            }
-            
-            if (data.deliveryType) {
-                const deliveryRadio = document.querySelector(`input[name="delivery-type"][value="${data.deliveryType}"]`);
-                if (deliveryRadio) deliveryRadio.checked = true;
-            }
-            
-            storageLog('📝 Campos do formulário preenchidos');
-        } catch (e) {
-            storageError('Erro ao preencher campos do formulário:', e);
-        }
-    }
-    
-    /**
-     * Limpar dados do pedido do localStorage
-     */
-    window.clearOrderDataFromStorage = function() {
-        const success = removeFromStorage(STORAGE_CONFIG.KEYS.ORDER_DATA);
-        if (success) {
-            storageLog('📝 Dados do pedido limpos do localStorage');
-        }
-        return success;
-    };
-    
-    // ===== FUNÇÕES ESPECÍFICAS DE TAXA DE DELIVERY =====
-    
-    /**
-     * Salvar taxa de delivery no localStorage
-     */
-    window.saveDeliveryFeeToStorage = function() {
-        if (typeof currentDeliveryFee !== 'undefined') {
-            const success = saveToStorage(STORAGE_CONFIG.KEYS.DELIVERY_FEE, currentDeliveryFee);
-            if (success) {
-                storageLog(`🚚 Taxa de delivery salva: ${currentDeliveryFee}`);
-            }
-            return success;
-        }
-        return false;
-    };
-    
-    /**
-     * Carregar taxa de delivery do localStorage
-     */
-    window.loadDeliveryFeeFromStorage = function() {
-        const savedFee = loadFromStorage(STORAGE_CONFIG.KEYS.DELIVERY_FEE);
-        if (savedFee !== null && typeof currentDeliveryFee !== 'undefined') {
-            currentDeliveryFee = savedFee;
-            storageLog(`🚚 Taxa de delivery restaurada: ${savedFee}`);
-            return true;
-        }
-        return false;
-    };
-    
-    /**
-     * Limpar taxa de delivery do localStorage
-     */
-    window.clearDeliveryFeeFromStorage = function() {
-        const success = removeFromStorage(STORAGE_CONFIG.KEYS.DELIVERY_FEE);
-        if (success) {
-            storageLog('🚚 Taxa de delivery limpa do localStorage');
-        }
-        return success;
-    };
-    
-    // ===== FUNÇÕES DE CACHE CSV (OPCIONAL) =====
-    
-    /**
-     * Salvar cache de CSV no localStorage
-     */
-    window.saveCsvCacheToStorage = function(csvData) {
-        if (csvData) {
-            const success = saveToStorage(STORAGE_CONFIG.KEYS.CSV_CACHE, csvData);
-            if (success) {
-                storageLog('📊 Cache CSV salvo');
-            }
-            return success;
-        }
-        return false;
-    };
-    
     /**
      * Carregar cache de CSV do localStorage
      */
@@ -13139,7 +13033,6 @@
      definidas no arquivo config.js
      ==================================================================== -->
 <div id="gtranslate_wrapper"></div>
-
 <script>
 debugLog('🔍 === DEBUG SISTEMA DE TRADUÇÃO ===');
 debugLog('TRADUCAO definida?', typeof TRADUCAO !== 'undefined');

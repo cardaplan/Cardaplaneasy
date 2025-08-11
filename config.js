@@ -266,3 +266,20 @@ function groupLog(label, fn) {
     return result;
 }
 
+// ====================================================================
+// CONFIGURAÇÃO DE LOCALIZAÇÃO FIXA
+// ====================================================================
+
+/**
+ * LOCAL_LOCK_ENABLED:
+ * - true  → Trava CEP e Cidade com os valores definidos
+ * - false → Campos de CEP e Cidade ficam livres para edição
+ */
+const LOCAL_LOCK_ENABLED = true;
+
+/**
+ * Valores padrão para quando LOCAL_LOCK_ENABLED = true
+ */
+const LOCAL_LOCK_CEP = '57230000';
+const LOCAL_LOCK_CIDADE = 'Coruripe-AL';
+
